@@ -1,0 +1,47 @@
+{
+  "version": "1.0",
+  "sliding_window_seconds": 60,
+  "membership_functions": {
+    "confidence": {
+      "domain": [0, 1],
+      "low": {"type": "trapmf", "points": [0, 0, 0.3, 0.5]},
+      "medium": {"type": "trimf", "points": [0.3, 0.55, 0.8]},
+      "high": {"type": "trapmf", "points": [0.65, 0.85, 1.0, 1.0]}
+    },
+    "frequency": {
+      "domain": [0, 20],
+      "note": "count of non-Benign predictions from this source IP within sliding_window_seconds",
+      "low": {"type": "trapmf", "points": [0, 0, 2, 5]},
+      "medium": {"type": "trimf", "points": [2, 7, 12]},
+      "high": {"type": "trapmf", "points": [8, 14, 20, 20]}
+    },
+    "risk": {
+      "domain": [0, 10],
+      "low": {"type": "trapmf", "points": [0, 0, 1.5, 3]},
+      "medium": {"type": "trimf", "points": [2, 4.5, 7]},
+      "high": {"type": "trimf", "points": [5.5, 7.5, 9]},
+      "critical": {"type": "trapmf", "points": [8, 9, 10, 10]}
+    }
+  },
+  "rules": [
+    {"confidence": "low", "frequency": "low", "risk": "low"},
+    {"confidence": "low", "frequency": "medium", "risk": "low"},
+    {"confidence": "low", "frequency": "high", "risk": "medium"},
+    {"confidence": "medium", "frequency": "low", "risk": "low"},
+    {"confidence": "medium", "frequency": "medium", "risk": "medium"},
+    {"confidence": "medium", "frequency": "high", "risk": "high"},
+    {"confidence": "high", "frequency": "low", "risk": "medium"},
+    {"confidence": "high", "frequency": "medium", "risk": "high"},
+    {"confidence": "high", "frequency": "high", "risk": "critical"}
+  ],
+  "action_thresholds": {
+    "LOG_ONLY": [0.0, 3.0],
+    "THROTTLE": [3.0, 6.0],
+    "DROP_PACKET": [6.0, 8.5],
+    "BLOCK_IP": [8.5, 10.0]
+  },
+  "benign_override": {
+    "enabled": true,
+    "note": "Predictions of class 'Benign' bypass the fuzzy system entirely and are always scored risk=0 (LOG_ONLY) — no reason to fuzzy-score traffic the CNN itself thinks is normal."
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "class_order": [
+    "Benign",
+    "DDoS",
+    "DoS",
+    "Mirai",
+    "Reconnaissance",
+    "Spoofing"
+  ],
+  "dropped_classes": [
+    "Brute Force",
+    "Web-based"
+  ],
+  "note": "Explicit manual encoding \u2014 NOT via LabelEncoder.fit(), to avoid the alphabetical-sort mismatch bug found in the original 8-class model."
+}

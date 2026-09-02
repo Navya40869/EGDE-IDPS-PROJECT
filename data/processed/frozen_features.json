@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "feature_order": [
+    "Tot sum",
+    "Max",
+    "AVG",
+    "Tot size",
+    "Rate",
+    "Time_To_Live",
+    "Header_Length",
+    "ack_flag_number",
+    "IAT",
+    "Min",
+    "Std",
+    "ack_count",
+    "HTTPS",
+    "Protocol Type",
+    "psh_flag_number",
+    "TCP",
+    "ICMP",
+    "UDP",
+    "syn_count",
+    "syn_flag_number"
+  ],
+  "feature_count": 20
+}

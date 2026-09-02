@@ -1,0 +1,111 @@
+{
+  "dataset": "CICIoT2023 (pre-stratified) \u2014 5-CLASS VARIANT",
+  "model": "1D-CNN",
+  "num_classes": 5,
+  "class_order": [
+    "DoS/DDoS",
+    "Benign",
+    "Mirai",
+    "Reconnaissance",
+    "Spoofing"
+  ],
+  "merged_classes": {
+    "DoS/DDoS": [
+      "DoS",
+      "DDoS"
+    ]
+  },
+  "dropped_classes": [
+    "Brute Force",
+    "Web-based"
+  ],
+  "merge_rationale": "DoS and DDoS merged after the 6-class model showed 64% of true DDoS flows misclassified as DoS \u2014 diagnosed as a per-flow feature-granularity limit (no cross-flow source-IP-diversity signal available in the frozen feature set). Distinguishing single- vs multi-source floods is deferred to the Risk Engine's per-source-IP sliding-window tracking (Phase 9), which has access to cross-flow context the CNN structurally lacks.",
+  "drop_rationale": "Brute Force and Web-based excluded due to F1 < 0.09 in the original 8-class model even with balanced class weighting; insufficient representative samples (2,263 and 4,289 rows respectively).",
+  "feature_count": 20,
+  "feature_names": [
+    "Tot sum",
+    "Max",
+    "AVG",
+    "Tot size",
+    "Rate",
+    "Time_To_Live",
+    "Header_Length",
+    "ack_flag_number",
+    "IAT",
+    "Min",
+    "Std",
+    "ack_count",
+    "HTTPS",
+    "Protocol Type",
+    "psh_flag_number",
+    "TCP",
+    "ICMP",
+    "UDP",
+    "syn_count",
+    "syn_flag_number"
+  ],
+  "scaler": "StandardScaler",
+  "test_accuracy": 0.9874303031345317,
+  "macro_f1": 0.8573953583421294,
+  "per_class_f1": {
+    "DoS/DDoS": 0.9993028025826498,
+    "Benign": 0.7831244492957561,
+    "Mirai": 0.9898836070923529,
+    "Reconnaissance": 0.7141309458105926,
+    "Spoofing": 0.8005349869292966
+  },
+  "class_weights": {
+    "DoS/DDoS": 0.22333183644978316,
+    "Benign": 8.560163777126409,
+    "Mirai": 3.567586800039442,
+    "Reconnaissance": 13.605805851813937,
+    "Spoofing": 19.328041668521568
+  },
+  "confusion_matrix": [
+    [
+      1456247,
+      9,
+      1587,
+      90,
+      97
+    ],
+    [
+      0,
+      29774,
+      0,
+      6427,
+      1838
+    ],
+    [
+      248,
+      1,
+      91000,
+      3,
+      21
+    ],
+    [
+      1,
+      5537,
+      0,
+      17468,
+      927
+    ],
+    [
+      0,
+      2679,
+      0,
+      1000,
+      13168
+    ]
+  ],
+  "hyperparameters": {
+    "learning_rate": 0.001,
+    "batch_size": 64,
+    "max_epochs": 80,
+    "early_stopping_patience": 12,
+    "loss_function": "CrossEntropyLoss (weighted, no Focal Loss)",
+    "random_state": 42
+  },
+  "training_environment": "Google Colab (T4 GPU)",
+  "training_date": "2026-08-14"
+}

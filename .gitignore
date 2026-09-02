@@ -1,0 +1,19 @@
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Large dataset files — never commit these
+Stratified_data.csv
+data/raw/
+
+# Large training arrays (hundreds of MB to ~1GB each)
+data/processed/*.npy
+
+# Packet captures
+*.pcap
+
+# Logs (generated at runtime)
+logs/

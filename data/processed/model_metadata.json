@@ -1,0 +1,153 @@
+{
+  "dataset": "CICIoT2023 (pre-stratified, raqeeb24/ciciot-2023-stratified-dataset)",
+  "model": "1D-CNN",
+  "num_classes": 8,
+  "feature_count": 20,
+  "feature_names": [
+    "Tot sum",
+    "Max",
+    "AVG",
+    "Tot size",
+    "Rate",
+    "Time_To_Live",
+    "Header_Length",
+    "ack_flag_number",
+    "IAT",
+    "Min",
+    "Std",
+    "ack_count",
+    "HTTPS",
+    "Protocol Type",
+    "psh_flag_number",
+    "TCP",
+    "ICMP",
+    "UDP",
+    "syn_count",
+    "syn_flag_number"
+  ],
+  "scaler": "StandardScaler",
+  "test_accuracy": 0.6867345880438165,
+  "macro_f1": 0.5839852928307223,
+  "per_class_f1": {
+    "Benign": 0.778786233289375,
+    "Brute Force": 0.08316831683168317,
+    "DDoS": 0.7449652967608574,
+    "DoS": 0.5078339281604315,
+    "Mirai": 0.9940081095722502,
+    "Reconnaissance": 0.7005561243951897,
+    "Spoofing": 0.7842510806239429,
+    "Web-based": 0.0783132530120482
+  },
+  "class_weights": {
+    "Benign": 5.3544079180851485,
+    "DoS": 450.1193370165746,
+    "DDoS": 0.17295438802373295,
+    "Reconnaissance": 0.7264300502704332,
+    "Spoofing": 2.2315361607485236,
+    "Brute Force": 8.510472051895416,
+    "Web-based": 12.08974758491742,
+    "Mirai": 237.4573010784028
+  },
+  "confusion_matrix": [
+    [
+      30118,
+      7,
+      0,
+      0,
+      0,
+      6448,
+      1432,
+      34
+    ],
+    [
+      162,
+      21,
+      0,
+      0,
+      0,
+      238,
+      32,
+      0
+    ],
+    [
+      23,
+      1,
+      715379,
+      461557,
+      490,
+      101,
+      95,
+      0
+    ],
+    [
+      10,
+      0,
+      27511,
+      252639,
+      158,
+      38,
+      28,
+      0
+    ],
+    [
+      3,
+      0,
+      34,
+      385,
+      90826,
+      2,
+      23,
+      0
+    ],
+    [
+      5582,
+      23,
+      0,
+      0,
+      0,
+      17447,
+      850,
+      31
+    ],
+    [
+      3148,
+      0,
+      0,
+      2,
+      0,
+      1144,
+      12519,
+      34
+    ],
+    [
+      261,
+      0,
+      0,
+      0,
+      0,
+      458,
+      100,
+      39
+    ]
+  ],
+  "hyperparameters": {
+    "learning_rate": 0.001,
+    "batch_size": 64,
+    "max_epochs": 50,
+    "early_stopping_patience": 7,
+    "random_state": 42
+  },
+  "training_environment": "Google Colab (T4 GPU)",
+  "training_date": "2026-08-03",
+  "class_order_note": "class_order corrected to match label_encoder.classes_ (true alphabetical training order) \u2014 earlier version had names mismatched due to sklearn LabelEncoder.fit() sorting alphabetically regardless of input order.",
+  "true_class_order": [
+    "Benign",
+    "Brute Force",
+    "DDoS",
+    "DoS",
+    "Mirai",
+    "Reconnaissance",
+    "Spoofing",
+    "Web-based"
+  ]
+}
