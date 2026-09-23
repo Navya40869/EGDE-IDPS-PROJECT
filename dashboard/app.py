@@ -69,20 +69,30 @@ else:
     recent_cutoff = now - pd.Timedelta(seconds=RECENT_WINDOW_SECONDS)
     recent_df = telemetry_df[telemetry_df["timestamp"] >= recent_cutoff]
 
+    # A real threat is a classified, non-Benign flow — INSUFFICIENT_EVIDENCE
+    # is neither a threat nor a clean pass, it's "we chose not to guess" due
+    # to too few packets in the flow (see engine/stream_pipeline.py gate).
+    classified_df = recent_df[recent_df["predicted_class"] != "INSUFFICIENT_EVIDENCE"]
+
     # --- Top metrics row ---
     col1, col2, col3, col4 = st.columns(4)
 
-    active_threats = (recent_df["predicted_class"] != "Benign").sum()
+    active_threats = (classified_df["predicted_class"] != "Benign").sum()
     col1.metric("Active Threats (last 60s)", int(active_threats))
 
     flows_per_sec = len(recent_df) / RECENT_WINDOW_SECONDS
     col2.metric("Flows / sec (avg, last 60s)", f"{flows_per_sec:.2f}")
 
-    avg_confidence = recent_df["confidence"].mean() if not recent_df.empty else 0.0
+    avg_confidence = classified_df["confidence"].mean() if not classified_df.empty else 0.0
     col3.metric("Avg CNN Confidence", f"{avg_confidence:.2%}" if pd.notna(avg_confidence) else "N/A")
 
     model_version = telemetry_df["model_version"].iloc[-1] if not telemetry_df.empty else "N/A"
     col4.metric("Model Version", model_version)
+
+    insufficient_count = (recent_df["predicted_class"] == "INSUFFICIENT_EVIDENCE").sum()
+    st.caption(f"{insufficient_count} of {len(recent_df)} flows in the last 60s were "
+               f"INSUFFICIENT_EVIDENCE (too few packets to classify) and are excluded "
+               f"from the metrics above.")
 
     st.divider()
 
@@ -99,14 +109,20 @@ else:
 
     with chart_col2:
         st.subheader("Risk Score Distribution")
-        if not recent_df.empty:
-            st.bar_chart(recent_df["risk_score"].value_counts(bins=10).sort_index())
+        if not classified_df.empty:
+            binned = pd.cut(classified_df["risk_score"], bins=10)
+            counts = binned.value_counts().sort_index()
+            # Convert Interval index to plain string labels — passing the
+            # raw IntervalIndex straight to st.bar_chart renders garbled
+            # axis text (e.g. "(0.441, 1.882]" gets truncated/mangled).
+            counts.index = [f"{iv.left:.1f}\u2013{iv.right:.1f}" for iv in counts.index]
+            st.bar_chart(counts)
         else:
-            st.write("No data in the last 60s.")
+            st.write("No classified flows in the last 60s.")
 
     st.subheader("Timeline of Risk Scores")
-    if not recent_df.empty:
-        timeline = recent_df.set_index("timestamp")["risk_score"]
+    if not classified_df.empty:
+        timeline = classified_df.sort_values("timestamp").set_index("timestamp")["risk_score"]
         st.line_chart(timeline)
     else:
         st.write("No data in the last 60s.")

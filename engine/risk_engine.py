@@ -126,12 +126,15 @@ class RiskEngine:
         self.ip_history[source_ip].append((now, predicted_class, confidence))
         self._prune_old_entries(source_ip, now)
 
-        if self.benign_override and predicted_class == "Benign":
+        if source_ip in self.config.get("ip_allowlist", []):
             risk_score = 0.0
             frequency = 0
+        elif self.benign_override and predicted_class == "Benign":
+           risk_score = 0.0
+           frequency = 0
         else:
-            frequency = self._compute_frequency(source_ip, now)
-            risk_score = self._fuzzy_compute(confidence, frequency)
+           frequency = self._compute_frequency(source_ip, now)
+           risk_score = self._fuzzy_compute(confidence, frequency)
 
         action = self._score_to_action(risk_score)
 

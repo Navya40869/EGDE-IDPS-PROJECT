@@ -22,6 +22,7 @@ import json
 import os
 import sys
 import time
+from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models"))
@@ -38,6 +39,8 @@ TELEMETRY_PATH = os.path.join(LOGS_DIR, "live_stream_output.csv")
 
 TELEMETRY_HEADER = [
     "timestamp", "flow_id", "source_ip", "destination_ip",
+    "protocol", "src_port", "dst_port", "packet_count",
+    "closed_reason", "flow_duration",
     "predicted_class", "confidence", "risk_score", "action", "model_version",
 ]
 
@@ -90,6 +93,31 @@ def main():
             time.sleep(0.5)
             while not flow_manager.closed_flow_queue.empty():
                 flow = flow_manager.closed_flow_queue.get()
+
+                MIN_PACKETS_FOR_CLASSIFICATION = 2
+                if len(flow.packets) < MIN_PACKETS_FOR_CLASSIFICATION:
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                    write_telemetry_row({
+                        "timestamp": timestamp,
+                        "flow_id": str(flow.flow_id),
+                        "source_ip": flow.src_ip,
+                        "destination_ip": flow.dst_ip,
+                        "protocol": flow.protocol,
+                        "src_port": flow.src_port,
+                        "dst_port": flow.dst_port,
+                        "packet_count": len(flow.packets),
+                        "closed_reason": flow.closed_reason,
+                        "flow_duration": round(max(flow.last_packet_time - flow.start_time, 0.0), 6),
+                        "predicted_class": "INSUFFICIENT_EVIDENCE",
+                        "confidence": 0.0,
+                        "risk_score": 0.0,
+                        "action": "NO_ACTION",
+                        "model_version": model_version,
+                    })
+                    print(f"{time.strftime('%H:%M:%S'):<10} {flow.src_ip:<16} "
+                          f"{'INSUFF_EVID':<12} {'--':<6}   {'--':<6} {'NO_ACTION':<12}")
+                    continue
+
                 try:
                     prediction = inference_engine.predict(flow)
                 except Exception as e:
@@ -109,12 +137,18 @@ def main():
                     risk_score=risk_result["risk_score"],
                 )
 
-                timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
                 write_telemetry_row({
                     "timestamp": timestamp,
                     "flow_id": str(flow.flow_id),
                     "source_ip": flow.src_ip,
                     "destination_ip": flow.dst_ip,
+                    "protocol": flow.protocol,
+                    "src_port": flow.src_port,
+                    "dst_port": flow.dst_port,
+                    "packet_count": len(flow.packets),
+                    "closed_reason": flow.closed_reason,
+                    "flow_duration": round(max(flow.last_packet_time - flow.start_time, 0.0), 6),
                     "predicted_class": prediction["predicted_class"],
                     "confidence": round(prediction["confidence"], 4),
                     "risk_score": risk_result["risk_score"],

@@ -1,6 +1,7 @@
 {
   "version": "1.0",
   "sliding_window_seconds": 60,
+  "ip_allowlist": ["192.168.60.73", "192.168.60.74"],
   "membership_functions": {
     "confidence": {
       "domain": [0, 1],
