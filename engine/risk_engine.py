@@ -130,11 +130,11 @@ class RiskEngine:
             risk_score = 0.0
             frequency = 0
         elif self.benign_override and predicted_class == "Benign":
-           risk_score = 0.0
-           frequency = 0
+            risk_score = 0.0
+            frequency = 0
         else:
-           frequency = self._compute_frequency(source_ip, now)
-           risk_score = self._fuzzy_compute(confidence, frequency)
+            frequency = self._compute_frequency(source_ip, now)
+            risk_score = self._fuzzy_compute(confidence, frequency)
 
         action = self._score_to_action(risk_score)
 
