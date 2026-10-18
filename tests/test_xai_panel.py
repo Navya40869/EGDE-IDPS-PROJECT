@@ -9,6 +9,7 @@ Run from the project root:
 """
 
 import os
+import re
 import sys
 import unittest
 from types import SimpleNamespace
@@ -133,7 +134,7 @@ class DashboardTour(unittest.TestCase):
         import re
         with open(os.path.join(PROJECT_ROOT, "dashboard", "app.py"), encoding="utf-8") as f:
             app = f.read()
-        tour = " ".join(xai_panel.DASHBOARD_TOUR).lower()
+        tour = " ".join(step.text for step in xai_panel.DASHBOARD_TOUR).lower()
         metrics = re.findall(r'col\d\.metric\("([^"]+)"', app)
         panels = [h for h in re.findall(r'term-header">\[ ([^\]]+?) \]', app)
                   if not h.startswith(("EXPLAINABLE AI", "XAI AGENT"))]
@@ -144,9 +145,55 @@ class DashboardTour(unittest.TestCase):
             self.assertIn(words.lower(), tour, f"tour doesn't mention {label!r}")
 
     def test_tour_is_a_few_short_bubbles(self):
-        self.assertTrue(3 <= len(xai_panel.DASHBOARD_TOUR) <= 5)
-        for text in xai_panel.DASHBOARD_TOUR:
-            self.assertLess(len(text.split()), 120)
+        self.assertTrue(4 <= len(xai_panel.DASHBOARD_TOUR) <= 6)
+        for step in xai_panel.DASHBOARD_TOUR:
+            self.assertLess(len(step.text.split()), 120)
+
+    def test_tour_opens_with_a_short_greeting_and_greets_only_once(self):
+        greeting, *rest = [s.text for s in xai_panel.DASHBOARD_TOUR]
+        self.assertTrue(greeting.startswith("Hi"))
+        self.assertLessEqual(len(greeting.split()), 45)
+        self.assertLessEqual(greeting.count(". ") + 1, 2)  # one or two sentences
+        for text in rest:
+            self.assertFalse(text.lower().startswith(("hi", "hello")))
+
+    def test_explain_panel_has_no_greeting(self):
+        e = SimpleNamespace(predicted_class="Mirai", confidence=0.99,
+                            attributions=[("Rate", 1.0, 3.0)])
+        text = xai_panel.build_summary(e, xai_panel.toward_shares(e.attributions))
+        self.assertTrue(text.startswith("I classified"))
+
+    def test_every_anchor_is_known_and_placed_in_app(self):
+        with open(os.path.join(PROJECT_ROOT, "dashboard", "app.py"), encoding="utf-8") as f:
+            app = f.read()
+        placed = set(re.findall(r'tour_anchor\("(\w+)"\)', app))
+        self.assertIn(xai_panel.TOUR_FALLBACK_ANCHOR, placed)
+        for step in xai_panel.DASHBOARD_TOUR:
+            self.assertIn(step.anchor, xai_panel.TOUR_ANCHORS)
+            self.assertIn(step.anchor, placed, f"app.py has no slot for {step.anchor!r}")
+        # Panels draw in this order, so the agent walks down the page
+        order = [m for m in re.findall(r'tour_anchor\("(\w+)"\)', app) if m not in ("intro", "sidebar")]
+        self.assertEqual(order, ["metrics", "charts", "feed"])
+
+    def test_scroll_respects_reduced_motion(self):
+        js = xai_panel.tour_scroll_script("xai_agent_tour_2")
+        self.assertIn(".st-key-xai_agent_tour_2", js)
+        self.assertIn("prefers-reduced-motion: reduce", js)
+        self.assertIn('reduce ? "auto" : "smooth"', js)
+
+
+class AgentCss(unittest.TestCase):
+    def test_avatar_is_enlarged_with_a_smaller_size_on_narrow_screens(self):
+        css = xai_panel.AGENT_CSS
+        self.assertIn('img[alt="assistant avatar"]', css)
+        sizes = [float(x) for x in re.findall(r"width: ([\d.]+)rem; height", css)]
+        self.assertEqual(sizes[0], 3.5)   # 1.75x Streamlit's 2rem default
+        self.assertTrue(2 < sizes[1] < sizes[0])
+        self.assertIn("max-width: 640px", css)
+
+    def test_reduced_motion_disables_tour_transitions(self):
+        reduced = xai_panel.AGENT_CSS.split("prefers-reduced-motion: reduce")[1]
+        self.assertIn("xai_tourpast_", reduced)
 
 
 if __name__ == "__main__":

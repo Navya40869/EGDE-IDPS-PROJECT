@@ -15,6 +15,7 @@ they can be unit-tested without a running app.
 """
 
 import time
+from collections import namedtuple
 
 import plotly.graph_objects as go
 import streamlit as st
@@ -103,6 +104,26 @@ AGENT_CSS = """
     [class*="st-key-xai_agent_"] [data-testid="stChatMessage"] {
         animation: xai-enter 0.35s ease-out both;
     }
+    /* Bigger robot: Streamlit draws chat avatars at 2rem; 3.5rem (1.75x) keeps
+       it legible beside the caption without crowding the bubble text. An SVG
+       avatar renders as <img alt="assistant avatar"> with no test id. */
+    [class*="st-key-xai_agent_"] [data-testid="stChatMessage"] img[alt="assistant avatar"] {
+        width: 3.5rem; height: 3.5rem; object-fit: contain;
+    }
+    @media (max-width: 640px) {
+        [class*="st-key-xai_agent_"] [data-testid="stChatMessage"] img[alt="assistant avatar"] {
+            width: 2.75rem; height: 2.75rem;
+        }
+    }
+    /* A tour step the agent has moved on from: kept readable, but dimmed and
+       without the robot, so the agent reads as having left for the next panel. */
+    [class*="st-key-xai_tourpast_"] {
+        opacity: 0.6; border-left: 2px solid #1f4d2a; padding-left: 0.75rem;
+        transition: opacity 0.3s ease-out;
+    }
+    [class*="st-key-xai_tourpast_"] p { font-size: 0.85rem; }
+    /* Holds only the scroll-into-view script; never takes up space */
+    [class*="st-key-xai_tourscroll_"] { display: none; }
     @keyframes xai-enter {
         from { opacity: 0; transform: translateY(10px); }
         to   { opacity: 1; transform: translateY(0); }
@@ -123,6 +144,7 @@ AGENT_CSS = """
         [class*="st-key-xai_agent_"] [data-testid="stChatMessage"],
         .xai-typing span { animation: none; }
         .xai-typing span { opacity: 0.7; }
+        [class*="st-key-xai_tourpast_"] { transition: none; }
     }
 </style>
 """
@@ -273,64 +295,139 @@ def render_xai_explanation(explanation, state=None, avatar=XAI_AGENT_AVATAR, key
 # --- Dashboard tour: fixed text describing the panels in app.py, in the order
 # they appear on the page. Written for someone new to networking and AI.
 # Keep in step with app.py if panels are added, renamed or removed.
+#
+# Each step names the panel it talks about (its anchor). app.py puts an empty
+# slot just above each panel (tour_anchor("metrics"), ...) and the step plays
+# in that slot, so the agent shows up beside whatever it is describing. "intro"
+# and "sidebar" both sit in the tour header at the top of the page, which is
+# also right next to the sidebar.
+TourStep = namedtuple("TourStep", "anchor text")
+TOUR_ANCHORS = ("intro", "metrics", "charts", "feed", "sidebar")
+TOUR_FALLBACK_ANCHOR = "intro"
+
 DASHBOARD_TOUR = [
-    "Hi! I'm the Edge-IDPS agent — let me show you around. This dashboard watches the "
-    "network traffic going in and out of this computer. Traffic travels in small pieces "
-    "called **packets**, and I group the packets exchanged between two devices into a "
-    "**flow**: think of it as one conversation. An AI model reads every flow and labels it "
-    "either **Benign** (normal) or as one of four kinds of attack: **DoS/DDoS** (flooding "
-    "a device so it stops responding), **Reconnaissance** (scanning for weak spots), "
-    "**Spoofing** (pretending to be a different device) or **Mirai** (malware that hijacks "
-    "internet-connected gadgets).",
+    TourStep("intro",
+             "Hi, I'm the Edge-IDPS XAI agent — the part of this dashboard that explains what "
+             "its AI is doing. I'll hop over to each panel in turn and tell you, in plain "
+             "language, what you're looking at."),
 
-    "The row of numbers at the top is the quick summary, covering the last minute by "
-    "default (you can change that window in the sidebar). **ACTIVE THREATS** counts the "
-    "flows labelled as an attack. **FLOWS/SEC** is how many conversations per second I'm "
-    "seeing; a sudden jump can mean a flood. **AVG CONFIDENCE** is how sure the AI was of "
-    "its labels on average: 95% means very sure. **IPs BLOCKED** is how many devices the "
-    "firewall has shut out (an IP address is a device's address on the network), and "
-    "**MODEL** is which version of the AI is running. Flows with too few packets to judge "
-    "are counted separately as INSUFFICIENT_EVIDENCE and left out of these numbers.",
+    TourStep("intro",
+             "First, the basics. This dashboard watches the network traffic going in and out "
+             "of this computer. Traffic travels in small pieces called **packets**, and I group "
+             "the packets exchanged between two devices into a **flow**: think of it as one "
+             "conversation. An AI model reads every flow and labels it either **Benign** "
+             "(normal) or as one of four kinds of attack: **DoS/DDoS** (flooding a device so it "
+             "stops responding), **Reconnaissance** (scanning for weak spots), **Spoofing** "
+             "(pretending to be a different device) or **Mirai** (malware that hijacks "
+             "internet-connected gadgets)."),
 
-    "The charts underneath show the bigger picture. **Attack category distribution** shows "
-    "how many flows got each label. Every flow also gets a **risk score** from 0 to 10 that "
-    "combines how sure the AI was with how often the same sender has looked suspicious in "
-    "the last minute: one shaky alert scores low, a confident and repeated one scores high. "
-    "**Risk score distribution** groups the flows by that score, and the **risk score "
-    "timeline** shows it over time, so spikes are the moments worth a closer look.",
+    TourStep("metrics",
+             "This row of numbers is the quick summary, covering the last minute by default "
+             "(you can change that window in the sidebar). **ACTIVE THREATS** counts the flows "
+             "labelled as an attack. **FLOWS/SEC** is how many conversations per second I'm "
+             "seeing; a sudden jump can mean a flood. **AVG CONFIDENCE** is how sure the AI was "
+             "of its labels on average: 95% means very sure. **IPs BLOCKED** is how many devices "
+             "the firewall has shut out (an IP address is a device's address on the network), "
+             "and **MODEL** is which version of the AI is running. Flows with too few packets to "
+             "judge are counted separately as INSUFFICIENT_EVIDENCE and left out of these numbers."),
 
-    "The **live event feed** lists the newest flows, one per line: the time, the sender's "
-    "address, the label, the AI's confidence, the risk score and what the system did about "
-    "it. Those actions get stronger as risk rises: **LOG_ONLY** (just noted), **THROTTLE** "
-    "(flagged to be slowed down), **DROP_PACKET** (its traffic is thrown away) and "
-    "**BLOCK_IP** (the sender is shut out). Senders that were dropped or blocked appear in "
-    "the **firewall blocklist** table, and **recent telemetry** is the raw log this whole "
-    "page is built from.",
+    TourStep("charts",
+             "These charts show the bigger picture. **Attack category distribution** shows how "
+             "many flows got each label. Every flow also gets a **risk score** from 0 to 10 that "
+             "combines how sure the AI was with how often the same sender has looked suspicious "
+             "in the last minute: one shaky alert scores low, a confident and repeated one scores "
+             "high. **Risk score distribution** groups the flows by that score, and the **risk "
+             "score timeline** shows it over time, so spikes are the moments worth a closer look."),
 
-    "Last, the sidebar on the left. You can pause the live updates, change the time window, "
-    "or filter the charts by label. **Explain a live flow** asks me to catch one fresh "
-    "conversation and explain *why* the AI labelled it the way it did: I'll name the "
-    "measurements that mattered most, and a donut chart shows how much each one pushed the "
-    "AI toward its answer. Feel free to click around — this page only displays what the "
-    "system is doing; nothing here can change it.",
+    TourStep("feed",
+             "The **live event feed** lists the newest flows, one per line: the time, the "
+             "sender's address, the label, the AI's confidence, the risk score and what the "
+             "system did about it. Those actions get stronger as risk rises: **LOG_ONLY** (just "
+             "noted), **THROTTLE** (flagged to be slowed down), **DROP_PACKET** (its traffic is "
+             "thrown away) and **BLOCK_IP** (the sender is shut out). Senders that were dropped "
+             "or blocked appear in the **firewall blocklist** table below, and **recent "
+             "telemetry** is the raw log this whole page is built from."),
+
+    TourStep("sidebar",
+             "Last, the sidebar on the left. You can pause the live updates, change the time "
+             "window, or filter the charts by label. **Explain a live flow** asks me to watch "
+             "the network for a few seconds and explain *why* the AI labelled the busiest "
+             "conversation the way it did; **Explain a replayed test row** does the same for a "
+             "saved example of an attack, like Mirai. I'll name the measurements that mattered "
+             "most, and a donut chart shows how much each one pushed the AI toward its answer. "
+             "Nothing on this page can change the system — it only displays it."),
 ]
 
 
-def render_dashboard_tour(state, avatar=XAI_AGENT_AVATAR, key="tour", messages=None):
+def tour_scroll_script(container_key):
     """
-    Plays the dashboard tour as a sequence of agent bubbles, each with typing
-    dots and the typewriter. state["shown"] counts the bubbles already played,
-    so a rerun mid-tour (a widget click) replays nothing: finished bubbles show
-    at once and the tour carries on from where it was.
+    Scrolls the parent page to the tour step in `container_key`. Streamlit
+    component iframes are same-origin, so the script can reach the page
+    around it. With prefers-reduced-motion it jumps instead of gliding.
     """
-    messages = DASHBOARD_TOUR if messages is None else messages
+    return f"""<script>
+const doc = window.parent.document;
+const el = doc.querySelector(".st-key-{container_key}");
+if (el) {{
+  const reduce = window.parent.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  el.scrollIntoView({{behavior: reduce ? "auto" : "smooth", block: "center"}});
+}}
+</script>"""
+
+
+def _tour_step_active(text, i, key, avatar, animate):
+    with st.container(key=f"xai_agent_{key}_{i}"), st.chat_message("assistant", avatar=avatar):
+        st.caption("EDGE-IDPS XAI AGENT · DASHBOARD TOUR")
+        if animate:
+            # Fixed script built here (no user input), so a same-origin iframe is safe
+            with st.container(key=f"xai_tourscroll_{key}_{i}"):
+                st.iframe(tour_scroll_script(f"xai_agent_{key}_{i}"), height=1)
+        _say(text, animate)
+
+
+def _tour_step_past(text, i, key):
+    with st.container(key=f"xai_tourpast_{key}_{i}"):
+        st.markdown(text)
+
+
+def render_dashboard_tour(state, slots, avatar=XAI_AGENT_AVATAR, key="tour", steps=None):
+    """
+    Plays the dashboard tour, each step beside the panel it describes.
+
+    slots: {anchor: st.container()} that app.py placed above each panel. A
+    step whose anchor has no slot (e.g. no telemetry yet, so the panels never
+    drew) plays in the TOUR_FALLBACK_ANCHOR slot instead.
+
+    Only the current step shows the agent (robot, typing dots, typewriter, and
+    a scroll to bring it into view). When the next step starts, the previous
+    one is redrawn as a dimmed note without the robot, so the agent appears to
+    move from panel to panel. state["shown"] counts the steps already played,
+    so a rerun mid-tour (a widget click) replays nothing: played steps show at
+    once and the tour carries on from where it was.
+
+    Must be called after every panel is drawn, since the slots are filled
+    from here, late in the script.
+    """
+    steps = DASHBOARD_TOUR if steps is None else steps
     st.markdown(AGENT_CSS, unsafe_allow_html=True)
-    for i, text in enumerate(messages):
-        with st.container(key=f"xai_agent_{key}_{i}"), \
-                st.chat_message("assistant", avatar=avatar):
-            if i == 0:
-                st.caption("EDGE-IDPS XAI AGENT · DASHBOARD TOUR")
-            animate = i >= state.get("shown", 0)
-            _say(text, animate)
-            if animate:
-                state["shown"] = i + 1
+
+    placeholders = []
+    for step in steps:
+        with slots.get(step.anchor, slots[TOUR_FALLBACK_ANCHOR]):
+            placeholders.append(st.empty())
+
+    shown = min(state.get("shown", 0), len(steps))
+    for i in range(shown):
+        with placeholders[i].container():
+            if i == shown - 1:
+                _tour_step_active(steps[i].text, i, key, avatar, animate=False)
+            else:
+                _tour_step_past(steps[i].text, i, key)
+
+    for i in range(shown, len(steps)):
+        if i > 0:
+            with placeholders[i - 1].container():
+                _tour_step_past(steps[i - 1].text, i - 1, key)
+        with placeholders[i].container():
+            _tour_step_active(steps[i].text, i, key, avatar, animate=True)
+        state["shown"] = i + 1

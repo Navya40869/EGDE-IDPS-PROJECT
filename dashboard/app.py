@@ -599,11 +599,32 @@ st.caption("`root@edge-idps:~#` real-time intrusion detection & prevention — r
 # told by the XAI agent. Display only: reads no data and captures nothing, so
 # it sits above the data loading and works with empty telemetry too.
 # =============================================================================
+# The agent "visits" each panel: tour_anchor() leaves an empty slot just above
+# a panel, and play_tour() — run once the panels are drawn, at the end of the
+# script — fills those slots one step at a time. Streamlit redraws the page
+# on every rerun rather than keeping a live DOM, so the agent can't glide
+# across the screen; instead each step appears beside its panel (with a fade
+# and a scroll to it) while the previous step dims. Slots sit in the normal
+# page flow, so they stack with their panels on narrow screens.
+tour_slots = {}
+
+
+def tour_anchor(name):
+    if "tour_state" in st.session_state:
+        tour_slots[name] = st.container()
+
+
+def play_tour():
+    if "tour_state" in st.session_state:
+        from xai_panel import render_dashboard_tour  # lazy: plotly loads only when shown
+        render_dashboard_tour(st.session_state["tour_state"], tour_slots)
+
+
 if "tour_state" in st.session_state:
-    from xai_panel import render_dashboard_tour  # lazy: plotly loads only when shown
     st.markdown('<div class="term-header">[ XAI AGENT :: WHAT AM I LOOKING AT? ]</div>',
                 unsafe_allow_html=True)
-    render_dashboard_tour(st.session_state["tour_state"])
+    tour_anchor("intro")
+    tour_anchor("sidebar")
     if st.button("Close tour", key="tour_close"):
         del st.session_state["tour_state"]
         st.rerun()
@@ -745,6 +766,7 @@ if telemetry_df.empty:
         "No telemetry yet. Run `python engine\\stream_pipeline.py --interface \"Wi-Fi\" "
         "--duration 60` in a separate terminal to start generating live data."
     )
+    play_tour()  # the panels below never draw, so every step plays in the tour header
     st.stop()
 
 now = pd.Timestamp.now()
@@ -768,6 +790,7 @@ filtered_df = classified_df[classified_df["predicted_class"].isin(selected_class
 # =============================================================================
 # TOP METRICS
 # =============================================================================
+tour_anchor("metrics")
 col1, col2, col3, col4, col5 = st.columns(5)
 
 active_threats = (classified_df["predicted_class"] != "Benign").sum()
@@ -794,6 +817,7 @@ st.markdown("---")
 # =============================================================================
 # CHARTS
 # =============================================================================
+tour_anchor("charts")
 chart_col1, chart_col2 = st.columns(2)
 
 with chart_col1:
@@ -825,6 +849,7 @@ st.markdown("---")
 # =============================================================================
 # LIVE FEED — terminal-style scrolling event log
 # =============================================================================
+tour_anchor("feed")
 st.markdown('<div class="term-header">[ LIVE EVENT FEED ]</div>', unsafe_allow_html=True)
 
 feed_source = recent_df if show_insufficient else classified_df
@@ -877,3 +902,6 @@ with table_col2:
 st.markdown("---")
 st.caption("`[read-only]` polls logs/live_stream_output.csv and logs/active_blocklist.txt "
            f"every {refresh_interval_ms/1000:.1f}s when auto-refresh is on. Never writes to either file.")
+
+# Last, so every panel the tour talks about is already on the page
+play_tour()
