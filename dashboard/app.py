@@ -9,7 +9,8 @@ polls, the pipeline writes — never the reverse.
 One deliberate exception: the sidebar "Explain a live flow" button runs a
 short sniff-only capture to explain a fresh prediction (see the EXPLAIN A LIVE
 FLOW section). It only runs on an explicit click, never on auto-refresh, and
-still writes nothing.
+still writes nothing. Its sibling "Explain a replayed test row" captures
+nothing: it explains a held-out row from data/processed/X_test_5class.npy.
 
 Refreshes every second via streamlit_autorefresh (can be paused from the
 sidebar for a static read while explaining something).
@@ -30,6 +31,8 @@ Run:
 telemetry for the dashboard to display.)
 """
 
+import ipaddress
+import json
 import os
 
 import pandas as pd
@@ -142,6 +145,24 @@ def class_tag(predicted_class: str) -> str:
     if predicted_class == "INSUFFICIENT_EVIDENCE":
         return f'<span class="term-tag tag-unknown">INSUFF_EVID</span>'
     return f'<span class="term-tag tag-block">{predicted_class}</span>'
+
+
+def _valid_ip(text: str) -> bool:
+    """Blank (no filter) or a well-formed IPv4/IPv6 address."""
+    if not text:
+        return True
+    try:
+        ipaddress.ip_address(text)
+        return True
+    except ValueError:
+        return False
+
+
+@st.cache_data
+def _replay_class_options() -> list:
+    # Read from the JSON rather than the model, so the sidebar loads no torch
+    with open(os.path.join(PROJECT_ROOT, "data", "processed", "class_order_5class.json")) as f:
+        return json.load(f)["class_order"]
 
 
 # =============================================================================
@@ -517,14 +538,40 @@ with st.sidebar:
     st.markdown("**Explainable AI**")
     xai_interface = st.text_input("Capture interface", value="", placeholder="default",
                                   help="e.g. Wi-Fi — blank uses Scapy's default")
-    xai_duration = st.slider("Max capture (seconds)", min_value=3, max_value=15, value=8)
+    xai_target_ip = st.text_input(
+        "Target IP (optional)", value="", placeholder="any",
+        help="Lab/demo use: only explain flows to or from this address, e.g. the "
+             "simulated victim IP you pointed scapy_attacker.py at. Leave blank "
+             "to consider all traffic.",
+    )
+    xai_target_ip = xai_target_ip.strip()
+    xai_target_ip_valid = _valid_ip(xai_target_ip)
+    if not xai_target_ip_valid:
+        st.error(f"`{xai_target_ip}` is not a valid IP address.")
+    xai_duration = st.slider("Capture window (seconds)", min_value=3, max_value=15, value=8)
     # Disabled while auto-refresh is on: an autorefresh rerun would abort the
     # capture mid-way. With auto-refresh paused there is no rerun timer at all.
     explain_clicked = st.button(
-        "Explain a live flow", disabled=auto_refresh, width="stretch",
-        help="Pause live auto-refresh first. Captures one fresh flow and shows "
-             "why the CNN classified it that way. Needs the dashboard to be "
-             "running as Administrator.",
+        "Explain a live flow", disabled=auto_refresh or not xai_target_ip_valid,
+        width="stretch",
+        help="Pause live auto-refresh first. Captures for the whole window, then "
+             "explains the flow with the most packets (to/from the target IP, if "
+             "set) — so an active attack wins over background traffic. Needs the "
+             "dashboard to be running as Administrator.",
+    )
+    st.caption("Explains the busiest flow in the window"
+               + (f" to/from `{xai_target_ip}`." if xai_target_ip else "."))
+    xai_replay_classes = _replay_class_options()
+    xai_replay_class = st.selectbox(
+        "Test-row class", xai_replay_classes,
+        index=xai_replay_classes.index("Mirai") if "Mirai" in xai_replay_classes else 0,
+        help="Class of the held-out CICIoT2023 test row to explain.",
+    )
+    replay_clicked = st.button(
+        "Explain a replayed test row", width="stretch",
+        help="No capture needed: picks a random held-out test row of the chosen "
+             "class and explains the CNN's prediction for it, the same way as a "
+             "live flow. For attacks this lab can't generate live, like Mirai.",
     )
     st.caption("New to this dashboard?")
     st.button(
@@ -591,17 +638,30 @@ def _load_explainer():
 
 if explain_clicked:
     status_lines = []
-    with st.spinner(f"Capturing up to {xai_duration}s for one classifiable flow ..."):
+    scope = f" to/from {xai_target_ip}" if xai_target_ip else ""
+    with st.spinner(f"Capturing for {xai_duration}s, then explaining the largest flow{scope} ..."):
         try:
             xp, xai_engine = _load_explainer()
             explanation = xp.capture_and_explain(
                 xai_engine, interface=xai_interface.strip() or None,
                 duration=xai_duration, on_status=status_lines.append,
+                target_ip=xai_target_ip or None,
             )
             st.session_state["xai_result"] = {"explanation": explanation, "status": status_lines}
         except Exception as e:
             st.session_state["xai_result"] = {"explanation": None,
                                               "status": status_lines + [f"ERROR: {e}"]}
+
+# Held-out test row: same model + Integrated Gradients path, no capture. Reads
+# data/processed/*_test_5class.npy only (never train rows) and writes nothing.
+if replay_clicked:
+    with st.spinner(f"Explaining a held-out {xai_replay_class} test row ..."):
+        try:
+            xp, xai_engine = _load_explainer()
+            explanation = xp.explain_test_row(xai_engine, xai_replay_class)
+            st.session_state["xai_result"] = {"explanation": explanation, "status": []}
+        except Exception as e:
+            st.session_state["xai_result"] = {"explanation": None, "status": [f"ERROR: {e}"]}
 
 if "xai_result" in st.session_state:
     xai = st.session_state["xai_result"]
@@ -616,9 +676,19 @@ if "xai_result" in st.session_state:
         xp, _ = _load_explainer()
         import matplotlib.pyplot as plt
         from xai_panel import render_xai_explanation  # lazy: plotly loads only when shown
-        st.markdown(f"Flow `{explanation.flow_id}` ({explanation.packet_count} packets) "
-                    f"→ {class_tag(explanation.predicted_class)} "
-                    f"confidence **{explanation.confidence:.1%}**", unsafe_allow_html=True)
+        verdict = (f"→ {class_tag(explanation.predicted_class)} "
+                   f"confidence **{explanation.confidence:.1%}**")
+        if explanation.source == "test_row":
+            st.markdown(f"Held-out test row `#{explanation.flow_id[1]}` "
+                        f"(true label {class_tag(explanation.true_class)}) {verdict}",
+                        unsafe_allow_html=True)
+            if explanation.predicted_class != explanation.true_class:
+                st.info(f"The model got this row wrong: it is really "
+                        f"{explanation.true_class}. The explanation below shows why it "
+                        f"leaned {explanation.predicted_class} instead.")
+        else:
+            st.markdown(f"Flow `{explanation.flow_id}` ({explanation.packet_count} packets) "
+                        f"{verdict}", unsafe_allow_html=True)
         render_xai_explanation(explanation, state=xai)
         with st.expander("Full attribution detail (toward and away from the prediction)"):
             xai_col1, xai_col2 = st.columns([3, 2])
@@ -634,7 +704,9 @@ if "xai_result" in st.session_state:
                     width="stretch", hide_index=True, height=560)
         st.caption("Integrated Gradients vs. an average-flow baseline (all-zero scaled vector). "
                    "Scaled value = standard deviations from the training mean. "
-                   "Explains this fresh capture only — not historical telemetry rows.")
+                   + ("Explains this held-out dataset row only — not live traffic or telemetry rows."
+                      if explanation.source == "test_row" else
+                      "Explains this fresh capture only — not historical telemetry rows."))
     if st.button("Clear explanation"):
         del st.session_state["xai_result"]
         st.rerun()
