@@ -1,0 +1,24 @@
+# dashboard/auth_config.example.yaml — TEMPLATE, safe to commit. Contains no real credentials.
+#
+# Setup (once):
+#   1. python dashboard/generate_password_hash.py --username <your_username>
+#   2. Paste the YAML it prints into dashboard/auth_config.yaml (gitignored —
+#      never commit that file).
+#
+# Passwords are stored ONLY as bcrypt hashes. The dashboard refuses to start
+# if any password below is not a bcrypt hash (plaintext is never accepted).
+
+credentials:
+  usernames:
+    analyst:                          # login username (lowercase)
+      first_name: SOC
+      last_name: Analyst
+      email: analyst@example.invalid  # informational only; nothing is ever emailed
+      password: "$2b$12$REPLACE_WITH_BCRYPT_HASH_FROM_generate_password_hash.py"
+
+cookie:
+  # Re-authentication cookie (a signed token, no password inside). Change the
+  # key to a long random secret — generate_password_hash.py prints one.
+  name: edge_idps_dashboard_auth
+  key: REPLACE_WITH_RANDOM_SECRET
+  expiry_days: 1
