@@ -773,6 +773,30 @@ now = pd.Timestamp.now()
 recent_cutoff = now - pd.Timedelta(seconds=window_seconds)
 recent_df = telemetry_df[telemetry_df["timestamp"] >= recent_cutoff]
 
+# Stale-telemetry guard. load_telemetry() only returns empty when the CSV is
+# missing (handled above). The silent trap is a non-empty file whose newest row
+# is older than the analysis window: every metric below then reads a confident
+# zero that looks like "no threats" but really means "no fresh data". Surface
+# the age and point at the writer (stream_pipeline.py is the only producer).
+latest_ts = telemetry_df["timestamp"].max()
+if recent_df.empty and pd.notna(latest_ts):
+    age_secs = (now - latest_ts).total_seconds()
+    if age_secs < 90:
+        age_str = f"{int(age_secs)}s"
+    elif age_secs < 5400:
+        age_str = f"{int(age_secs // 60)}m"
+    else:
+        age_str = f"{age_secs / 3600:.1f}h"
+    st.warning(
+        f"No telemetry in the last {window_seconds}s, so every metric below reads "
+        f"zero — this is stale data, not an all-clear. The newest row is **{age_str} "
+        f"old** (last seen {latest_ts.strftime('%Y-%m-%d %H:%M:%S')}). The dashboard "
+        f"only displays what `engine/stream_pipeline.py` writes; start it in a "
+        f"separate terminal to see live flows:\n\n"
+        f"`python engine\\stream_pipeline.py --interface \"Wi-Fi\" --duration 300`\n\n"
+        f"(Or widen the **Analysis window** slider to include older rows.)"
+    )
+
 # A real threat is a classified, non-Benign flow — INSUFFICIENT_EVIDENCE is
 # neither a threat nor a clean pass, it's "too few packets to classify".
 classified_df = recent_df[recent_df["predicted_class"] != "INSUFFICIENT_EVIDENCE"]
