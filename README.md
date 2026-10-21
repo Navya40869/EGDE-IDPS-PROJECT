@@ -12,8 +12,11 @@ lab network you control**.
 
 ## Prerequisites
 
-- Python 3.11+ with the project dependencies:
-  `pip install torch scikit-learn scapy scikit-fuzzy streamlit pandas numpy joblib`
+- Python 3.12+ (tested on 3.13.3; the pinned numpy/scipy need >= 3.12). Install
+  every dependency, including the dashboard and explainability tool
+  ([docs/EXPLAINABILITY.md](docs/EXPLAINABILITY.md)), in one step:
+  `pip install -r requirements.txt`
+  (versions are pinned to the known-working set; see the comments in that file)
 - **Live capture needs raw-socket access**: run the pipeline terminal as
   Administrator (Windows) or with `sudo` (Linux). Windows also needs
   [Npcap](https://npcap.com/) installed.
@@ -36,7 +39,9 @@ python engine/stream_pipeline.py --interface "Wi-Fi" --duration 120 --firewall-m
 - `--firewall-mode` — `simulation` (log actions only) or `windows` (apply real
   firewall rules).
 
-**2. Start the dashboard** (separate terminal):
+**2. Start the dashboard** (separate terminal). It requires a login: once, run
+`python dashboard/generate_password_hash.py --username <name>` and paste the output
+into `dashboard/auth_config.yaml` (gitignored):
 
 ```
 streamlit run dashboard/app.py
