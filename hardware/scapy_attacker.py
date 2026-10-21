@@ -40,7 +40,7 @@ import argparse
 import random
 import time
 
-from scapy.all import IP, TCP, ARP, send
+from scapy.all import IP, TCP, ARP, Ether, send, sendp
 
 
 def dos_flood(target_ip: str, target_port: int = 80, duration_seconds: int = 15,
@@ -89,18 +89,23 @@ def dos_flood(target_ip: str, target_port: int = 80, duration_seconds: int = 15,
     try:
         while time.time() < end_time:
             src_port = random.randint(1024, 65535)
+            # Send at Layer 2 with a broadcast dst MAC so scapy never does
+            # per-packet ARP resolution for target_ip. target_ip is typically a
+            # deliberately unreachable address (no device answers ARP), and L3
+            # send() would stall ~2s per packet waiting for an ARP reply that
+            # never comes, collapsing throughput. sendp()+Ether bypasses that.
             if spoof_source:
                 src_ip = f"10.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(1,254)}"
-                base = IP(src=src_ip, dst=target_ip)
+                base = Ether(dst="ff:ff:ff:ff:ff:ff") / IP(src=src_ip, dst=target_ip)
             else:
-                base = IP(dst=target_ip)
+                base = Ether(dst="ff:ff:ff:ff:ff:ff") / IP(dst=target_ip)
             # Burst many SYNs from the SAME src_port so this 5-tuple flow is a
             # high-volume SYN burst (>=~100 pkts) the CNN labels DoS/DDoS, not
             # just a >=2-packet flow that merely clears the gate (see docstring).
             for _ in range(packets_per_flow):
                 if time.time() >= end_time:
                     break
-                send(base / TCP(sport=src_port, dport=target_port, flags="S"), verbose=0)
+                sendp(base / TCP(sport=src_port, dport=target_port, flags="S"), verbose=0)
                 sent_count += 1
                 time.sleep(interval)
     except KeyboardInterrupt:
@@ -169,8 +174,11 @@ def recon_scan(target_ip: str, port_start: int = 1, port_end: int = 1024,
                 break
             src_port = random.randint(1024, 65535)
             for _ in range(probes_per_port):
-                pkt = IP(dst=target_ip) / TCP(sport=src_port, dport=port, flags="S")
-                send(pkt, verbose=0)
+                # L2 broadcast send: same ARP-stall avoidance as dos_flood ---
+                # target_ip may not answer ARP, and L3 send() would block ~2s
+                # per probe waiting for a reply that never comes.
+                pkt = Ether(dst="ff:ff:ff:ff:ff:ff") / IP(dst=target_ip) / TCP(sport=src_port, dport=port, flags="S")
+                sendp(pkt, verbose=0)
                 sent_count += 1
                 time.sleep(interval)
             ports_scanned += 1
@@ -197,8 +205,10 @@ def benign_traffic(target_ip: str, target_port: int = 80, duration_seconds: int 
     try:
         while time.time() < end_time:
             src_port = random.randint(1024, 65535)
-            pkt = IP(dst=target_ip) / TCP(sport=src_port, dport=target_port, flags="S")
-            send(pkt, verbose=0)
+            # L2 broadcast send: same ARP-stall avoidance as dos_flood (target_ip
+            # may not answer ARP; L3 send() would block ~2s per packet).
+            pkt = Ether(dst="ff:ff:ff:ff:ff:ff") / IP(dst=target_ip) / TCP(sport=src_port, dport=target_port, flags="S")
+            sendp(pkt, verbose=0)
             sent_count += 1
             time.sleep(interval)
     except KeyboardInterrupt:

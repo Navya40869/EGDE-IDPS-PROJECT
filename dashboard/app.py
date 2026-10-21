@@ -124,6 +124,8 @@ st.markdown("""
     .stDataFrame { border: 1px solid #00ff4133 !important; }
     ::-webkit-scrollbar { width: 8px; background: #0a0e0a; }
     ::-webkit-scrollbar-thumb { background: #00ff4155; border-radius: 4px; }
+    /* Holds only the reduced-motion probe below; never takes up space */
+    .st-key-motion_probe { display: none; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -457,10 +459,14 @@ def _on_logout(_details):
     st.session_state["login_notice"] = "Logged out."
 
 
-def _start_tour():
+def _pause_auto_refresh():
     # Runs before the rerun, so the toggle below renders already paused: an
     # auto-refresh rerun would otherwise cut the agent off mid-sentence.
     st.session_state["auto_refresh"] = False
+
+
+def _start_tour():
+    _pause_auto_refresh()
     st.session_state["tour_state"] = {}
 
 
@@ -498,6 +504,29 @@ if st.session_state.get("authentication_status") is True:
 
 if st.session_state.get("authentication_status") is not True:
     st.stop()  # the login card above shows any denied / logged-out message
+
+
+# Reduced motion: the browser's prefers-reduced-motion setting (an OS
+# accessibility option). CSS media queries stop the XAI agent's animations on
+# their own, but its typewriter is driven from Python, so Python needs the
+# setting too. This invisible component reports it — once on load, and again
+# if it changes — and only when it differs from what Python already has, so
+# it triggers at most one rerun per change.
+_motion_probe = st.components.v2.component("reduced_motion_probe", js="""
+export default function({ data, setStateValue }) {
+  const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const report = () => { if (mq.matches !== data) setStateValue("reduce", mq.matches); };
+  report();
+  mq.addEventListener("change", report);
+  return () => mq.removeEventListener("change", report);
+}
+""")
+with st.container(key="motion_probe"):
+    reduce_motion = bool(_motion_probe(
+        key="reduced_motion_probe", data=st.session_state.get("reduce_motion"),
+        on_reduce_change=lambda: None,
+    ).reduce)
+st.session_state["reduce_motion"] = reduce_motion
 
 
 # =============================================================================
@@ -568,10 +597,11 @@ with st.sidebar:
         help="Class of the held-out CICIoT2023 test row to explain.",
     )
     replay_clicked = st.button(
-        "Explain a replayed test row", width="stretch",
+        "Explain a replayed test row", width="stretch", on_click=_pause_auto_refresh,
         help="No capture needed: picks a random held-out test row of the chosen "
              "class and explains the CNN's prediction for it, the same way as a "
-             "live flow. For attacks this lab can't generate live, like Mirai.",
+             "live flow. For attacks this lab can't generate live, like Mirai. "
+             "Pauses live auto-refresh while the agent talks.",
     )
     st.caption("New to this dashboard?")
     st.button(
@@ -617,7 +647,8 @@ def tour_anchor(name):
 def play_tour():
     if "tour_state" in st.session_state:
         from xai_panel import render_dashboard_tour  # lazy: plotly loads only when shown
-        render_dashboard_tour(st.session_state["tour_state"], tour_slots)
+        render_dashboard_tour(st.session_state["tour_state"], tour_slots,
+                              reduce_motion=reduce_motion)
 
 
 if "tour_state" in st.session_state:
@@ -710,7 +741,7 @@ if "xai_result" in st.session_state:
         else:
             st.markdown(f"Flow `{explanation.flow_id}` ({explanation.packet_count} packets) "
                         f"{verdict}", unsafe_allow_html=True)
-        render_xai_explanation(explanation, state=xai)
+        render_xai_explanation(explanation, state=xai, reduce_motion=reduce_motion)
         with st.expander("Full attribution detail (toward and away from the prediction)"):
             xai_col1, xai_col2 = st.columns([3, 2])
             with xai_col1:

@@ -14,6 +14,7 @@ The pure helpers (toward_shares, build_summary) have no Streamlit calls, so
 they can be unit-tested without a running app.
 """
 
+import re
 import time
 from collections import namedtuple
 
@@ -22,48 +23,100 @@ import streamlit as st
 
 
 
-def robot_avatar_svg(line="#00ff41", face="#0d1310", eye="#16261a"):
+def robot_avatar_svg(line="#00ff41", face="#0d1310", eye="#16261a",
+                     body="#56655c", shade="#26302b", walking=False):
     """
-    Animated robot head as an SVG string (big binocular eyes, antenna).
+    Animated full-body robot as an SVG string: binocular eyes on a neck, a
+    boxy gunmetal body with a green chest readout, stubby arms and a tread.
 
     st.chat_message(avatar=...) accepts a raw "<svg ...>" string and shows it as
     an <img> data URI. Browsers run CSS @keyframes inside an SVG loaded that
     way (scripts are blocked, which this doesn't need), so the animation lives
-    in the SVG's own <style>: an occasional blink, a slow bob, and an antenna
-    twitch that is still most of the time. All motion stops under
-    prefers-reduced-motion.
+    in the SVG's own <style>: an occasional blink, a slow bob and head tilt,
+    and an antenna twitch that is still most of the time.
+
+    walking=True adds a one-shot "arrival" that plays as the image loads: the
+    tread rolls, the wheels turn, and the body leans forward and steps twice
+    before settling into the idle loop. The page-level CSS slides the image in
+    from the left at the same time (AGENT_CSS, "xai_walk_").
+
+    All motion stops under prefers-reduced-motion.
     """
+    walk_css = f"""
+  .walk {{ transform-box: view-box; transform-origin: 24px 46px;
+           animation: lean 1.4s ease-out both; }}
+  .track {{ animation: roll 0.35s linear 4; }}
+  .wheel {{ transform-box: fill-box; transform-origin: center;
+            animation: spin 1.4s ease-out 1; }}
+  @keyframes lean {{ 0% {{ transform: rotate(8deg); }}
+                     15%, 45% {{ transform: rotate(8deg) translateY(-1.2px); }}
+                     30%, 60% {{ transform: rotate(8deg) translateY(0); }}
+                     100% {{ transform: rotate(0deg); }} }}
+  @keyframes roll {{ to {{ stroke-dashoffset: -3.2; }} }}
+  @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+  @media (prefers-reduced-motion: reduce) {{ .walk, .track, .wheel {{ animation: none; }} }}""" if walking else ""
+    wheels = "".join(
+        f'<g class="wheel"><circle cx="{x}" cy="42.5" r="2.3" fill="{face}" stroke="{body}" '
+        f'stroke-width="0.7"/><line x1="{x}" y1="40.6" x2="{x}" y2="44.4" stroke="{line}" '
+        f'stroke-opacity="0.55" stroke-width="0.7"/></g>'
+        for x in (14, 24, 34))
     return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+<defs>
+  <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="{body}"/><stop offset="1" stop-color="{shade}"/>
+  </linearGradient>
+</defs>
 <style>
   .bob {{ animation: bob 4s ease-in-out infinite alternate; }}
+  .head {{ transform-box: view-box; transform-origin: 24px 22px;
+           animation: tilt 9s ease-in-out infinite; }}
   .eyes {{ transform-box: fill-box; transform-origin: center;
            animation: blink 5.5s ease-in-out infinite; }}
-  .ant {{ transform-box: view-box; transform-origin: 24px 11px;
+  .ant {{ transform-box: view-box; transform-origin: 32.5px 6.5px;
           animation: twitch 7s ease-in-out infinite; }}
-  @keyframes bob {{ from {{ transform: translateY(0.6px); }} to {{ transform: translateY(-1.2px); }} }}
+  @keyframes bob {{ from {{ transform: translateY(0.4px); }} to {{ transform: translateY(-0.9px); }} }}
+  @keyframes tilt {{ 0%, 20%, 100% {{ transform: rotate(0deg); }}
+                     35%, 45% {{ transform: rotate(-5deg); }} 65%, 75% {{ transform: rotate(3deg); }} }}
   @keyframes blink {{ 0%, 88%, 100% {{ transform: scaleY(1); }}
                       91% {{ transform: scaleY(0.08); }} 94% {{ transform: scaleY(1); }} }}
   @keyframes twitch {{ 0%, 70%, 100% {{ transform: rotate(0deg); }}
                        75% {{ transform: rotate(-12deg); }} 82% {{ transform: rotate(9deg); }}
                        88% {{ transform: rotate(0deg); }} }}
-  @media (prefers-reduced-motion: reduce) {{ .bob, .eyes, .ant {{ animation: none; }} }}
+  @media (prefers-reduced-motion: reduce) {{ .bob, .head, .eyes, .ant {{ animation: none; }} }}{walk_css}
 </style>
-<g class="bob">
-  <g class="ant">
-    <line x1="24" y1="11" x2="24" y2="5" stroke="{line}" stroke-width="1.6" stroke-linecap="round"/>
-    <circle cx="24" cy="4" r="2.2" fill="{line}"/>
+<g class="walk">
+  <rect x="8.5" y="38.5" width="31" height="8" rx="4" fill="{shade}"/>
+  <rect class="track" x="9.1" y="39.1" width="29.8" height="6.8" rx="3.4" fill="none" stroke="{face}"
+        stroke-width="1.2" stroke-dasharray="1.6 1.6"/>
+  {wheels}
+  <g class="bob">
+    <rect x="7.5" y="26" width="4" height="8" rx="1.6" fill="url(#metal)"/>
+    <rect x="36.5" y="26" width="4" height="8" rx="1.6" fill="url(#metal)"/>
+    <rect x="11.5" y="22.5" width="25" height="17" rx="2.5" fill="url(#metal)" stroke="{face}" stroke-width="0.8"/>
+    <rect x="15" y="26" width="11" height="6.5" rx="1" fill="{face}"/>
+    <rect x="16.3" y="28.3" width="4.5" height="1.9" rx="0.5" fill="{line}"/>
+    <rect x="21.6" y="28.3" width="2.8" height="1.9" rx="0.5" fill="{line}" fill-opacity="0.45"/>
+    <circle cx="31" cy="28.5" r="1.4" fill="{line}"/>
+    <line x1="11.5" y1="35.5" x2="36.5" y2="35.5" stroke="{face}" stroke-width="0.7"/>
+    <g class="head">
+      <rect x="22.6" y="17" width="2.8" height="6" fill="{shade}"/>
+      <rect x="20.5" y="11" width="7" height="2.6" rx="1" fill="{shade}"/>
+      <g class="ant">
+        <line x1="32.5" y1="6.5" x2="34.5" y2="2.6" stroke="{body}" stroke-width="1" stroke-linecap="round"/>
+        <circle cx="34.8" cy="2.2" r="1.3" fill="{line}"/>
+      </g>
+      <rect x="9.5" y="5.5" width="13" height="12.5" rx="5" fill="url(#metal)" stroke="{face}" stroke-width="0.8"/>
+      <rect x="25.5" y="5.5" width="13" height="12.5" rx="5" fill="url(#metal)" stroke="{face}" stroke-width="0.8"/>
+      <rect x="11.4" y="7.4" width="9.2" height="8.7" rx="3.8" fill="{eye}" stroke="{line}" stroke-width="0.8"/>
+      <rect x="27.4" y="7.4" width="9.2" height="8.7" rx="3.8" fill="{eye}" stroke="{line}" stroke-width="0.8"/>
+      <g class="eyes">
+        <circle cx="16" cy="11.75" r="2.7" fill="{line}"/>
+        <circle cx="32" cy="11.75" r="2.7" fill="{line}"/>
+        <circle cx="17" cy="10.7" r="0.85" fill="{face}"/>
+        <circle cx="33" cy="10.7" r="0.85" fill="{face}"/>
+      </g>
+    </g>
   </g>
-  <rect x="7" y="11" width="34" height="22" rx="8" fill="{face}" stroke="{line}" stroke-width="1.6"/>
-  <g class="eyes">
-    <rect x="11" y="15" width="11.5" height="14" rx="5.5" fill="{eye}" stroke="{line}" stroke-width="1.3"/>
-    <rect x="25.5" y="15" width="11.5" height="14" rx="5.5" fill="{eye}" stroke="{line}" stroke-width="1.3"/>
-    <circle cx="17.5" cy="22.5" r="3.1" fill="{line}"/>
-    <circle cx="30.5" cy="22.5" r="3.1" fill="{line}"/>
-    <circle cx="18.6" cy="21.3" r="0.9" fill="{face}"/>
-    <circle cx="31.6" cy="21.3" r="0.9" fill="{face}"/>
-  </g>
-  <rect x="15" y="35" width="18" height="8" rx="3" fill="{face}" stroke="{line}" stroke-width="1.4"/>
-  <line x1="19" y1="39" x2="29" y2="39" stroke="{line}" stroke-width="1.2" stroke-linecap="round"/>
 </g>
 </svg>"""
 
@@ -72,6 +125,8 @@ def robot_avatar_svg(line="#00ff41", face="#0d1310", eye="#16261a"):
 # emoji ("🤖"), an image path or URL, or another SVG string — via this
 # constant or the avatar= parameter of the render functions.
 XAI_AGENT_AVATAR = robot_avatar_svg()
+# The tour's arriving agent: the same robot, rolling in to its next panel
+XAI_AGENT_WALKING_AVATAR = robot_avatar_svg(walking=True)
 
 # Mirrors explain_prediction.NEGLIGIBLE_ATTRIBUTION. Not imported, so this module
 # never pulls in torch/captum (explain_prediction imports torch at module level).
@@ -88,13 +143,15 @@ MAX_NAMED_SLICES = 5
 SLICE_COLORS = ["#16a33a", "#3987e5", "#d95926", "#9085e9", "#c98500"]
 OTHER_COLOR = "#5a5f5a"
 
-# Typewriter pacing: ~1.5 s for the whole message, 15-30 ms per word
-TYPEWRITER_TOTAL_S = 1.5
-TYPEWRITER_MIN_DELAY_S = 0.015
-TYPEWRITER_MAX_DELAY_S = 0.03
+# Typewriter pacing, slow enough to read along with: 180 ms per word (~330
+# words a minute) plus a short breath after clauses and a longer one after
+# sentences, the way someone talking would pause.
+TYPEWRITER_WORD_S = 0.18
+TYPEWRITER_CLAUSE_PAUSE_S = 0.2
+TYPEWRITER_SENTENCE_PAUSE_S = 0.45
 
 # "Typing…" dots shown before each message starts typing
-TYPING_INDICATOR_S = 0.5
+TYPING_INDICATOR_S = 1.2
 
 # Entrance animation for agent bubbles and the typing dots. Scoped to the
 # "xai_agent_*" containers this module creates, so other chat elements and
@@ -103,6 +160,16 @@ AGENT_CSS = """
 <style>
     [class*="st-key-xai_agent_"] [data-testid="stChatMessage"] {
         animation: xai-enter 0.35s ease-out both;
+    }
+    /* The tour's arriving agent rolls in from the left while the SVG itself
+       leans and turns its tread (robot_avatar_svg(walking=True)) */
+    [class*="st-key-xai_walk_"] [data-testid="stChatMessage"] img[alt="assistant avatar"] {
+        animation: xai-walk-in 1.4s cubic-bezier(0.25, 0.7, 0.35, 1) both;
+    }
+    @keyframes xai-walk-in {
+        from { transform: translateX(-2.5rem); opacity: 0; }
+        25%  { opacity: 1; }
+        to   { transform: translateX(0); }
     }
     /* Bigger robot: Streamlit draws chat avatars at 2rem; 3.5rem (1.75x) keeps
        it legible beside the caption without crowding the bubble text. An SVG
@@ -142,6 +209,7 @@ AGENT_CSS = """
     }
     @media (prefers-reduced-motion: reduce) {
         [class*="st-key-xai_agent_"] [data-testid="stChatMessage"],
+        [class*="st-key-xai_walk_"] [data-testid="stChatMessage"] img[alt="assistant avatar"],
         .xai-typing span { animation: none; }
         .xai-typing span { opacity: 0.7; }
         [class*="st-key-xai_tourpast_"] { transition: none; }
@@ -217,13 +285,30 @@ def build_summary(explanation, shares):
     return text
 
 
+def _words(text):
+    # Each word with the whitespace before it, so "".join() gives text back
+    # exactly, paragraph breaks included
+    return re.findall(r"\s*\S+", text)
+
+
+def _word_delay(word):
+    end = word.strip().rstrip("*_)\"'")  # look past closing markdown and quotes
+    if end.endswith((".", "!", "?", ":")):
+        return TYPEWRITER_WORD_S + TYPEWRITER_SENTENCE_PAUSE_S
+    if end.endswith((",", ";", "—")):
+        return TYPEWRITER_WORD_S + TYPEWRITER_CLAUSE_PAUSE_S
+    return TYPEWRITER_WORD_S
+
+
+def reading_time(text):
+    """Seconds the typewriter takes over `text` (typing dots not included)."""
+    return sum(_word_delay(w) for w in _words(text))
+
+
 def _typewriter(text):
-    words = text.split(" ")
-    delay = min(max(TYPEWRITER_TOTAL_S / max(len(words), 1), TYPEWRITER_MIN_DELAY_S),
-                TYPEWRITER_MAX_DELAY_S)
-    for i, word in enumerate(words):
-        yield word if i == 0 else " " + word
-        time.sleep(delay)
+    for word in _words(text):
+        yield word
+        time.sleep(_word_delay(word))
 
 
 def build_donut(explanation, shares):
@@ -269,14 +354,19 @@ def _say(text, animate):
         slot.markdown(text)
 
 
-def render_xai_explanation(explanation, state=None, avatar=XAI_AGENT_AVATAR, key="xai"):
+def render_xai_explanation(explanation, state=None, avatar=XAI_AGENT_AVATAR, key="xai",
+                           reduce_motion=False):
     """
     Renders the agent chat bubble (typewriter text) with the contribution donut.
 
     state: a dict that persists across reruns (e.g. the session-state entry
     holding this explanation). The typing dots and typewriter play once per
-    explanation; later reruns — auto-refresh, widget clicks — show the finished
-    text instantly.
+    explanation; later reruns — auto-refresh, widget clicks, even one that
+    cuts the typewriter off — show the finished text instantly.
+
+    reduce_motion: the browser asks for reduced motion (app.py reads it). The
+    text then appears whole at once; CSS media queries can't do this part,
+    since Python drives the typewriter.
     """
     shares = toward_shares(explanation.attributions)
     text = build_summary(explanation, shares)
@@ -284,9 +374,9 @@ def render_xai_explanation(explanation, state=None, avatar=XAI_AGENT_AVATAR, key
     with st.container(key=f"xai_agent_{key}"), st.chat_message("assistant", avatar=avatar):
         st.caption("EDGE-IDPS XAI AGENT")
         animate = state is not None and not state.get("typed")
-        _say(text, animate)
         if animate:
-            state["typed"] = True
+            state["typed"] = True  # before typing, so an interrupted run isn't retyped
+        _say(text, animate and not reduce_motion)
         if shares:
             st.plotly_chart(build_donut(explanation, shares), key=f"{key}_donut",
                             config={"displaylogo": False})
@@ -306,10 +396,27 @@ TOUR_ANCHORS = ("intro", "metrics", "charts", "feed", "sidebar")
 TOUR_FALLBACK_ANCHOR = "intro"
 
 DASHBOARD_TOUR = [
+    # The greeting is deliberately the longest, unhurried bubble: about a
+    # minute at the typewriter's pace (reading_time()).
     TourStep("intro",
-             "Hi, I'm the Edge-IDPS XAI agent — the part of this dashboard that explains what "
-             "its AI is doing. I'll hop over to each panel in turn and tell you, in plain "
-             "language, what you're looking at."),
+             "Hi there, and welcome! I'm the Edge-IDPS XAI agent, a small robot who lives "
+             "inside this dashboard, and I'm really glad you stopped by. My job is to explain "
+             "things. This system keeps watch over the network traffic around this computer, "
+             "and an AI model decides, many times every second, whether that traffic looks "
+             "normal or looks like an attack. That AI is quick, but on its own it never tells "
+             "you *why* it decided anything. That's where I come in: I put what it's doing into "
+             "plain words, so you can understand its decisions, and feel free to question them "
+             "when something doesn't look right.\n\n"
+             "Over the next few minutes I'll walk you around the page, one panel at a time. "
+             "We'll start with a few basics about how networks talk, then roll over to the "
+             "summary numbers at the top, the charts that show the bigger picture, the live feed "
+             "of events, and finally the controls in the sidebar, where you can ask me to "
+             "explain a single decision in detail.\n\n"
+             "You don't need any background in networking or AI to follow along. I'll explain "
+             "every term as we go, and nothing on this tour changes how the system behaves: "
+             "it's all look, no touch. If you've seen enough at any point, the **Close tour** "
+             "button at the top ends it straight away. So get comfortable, take your time, and "
+             "let's go and have a look around together."),
 
     TourStep("intro",
              "First, the basics. This dashboard watches the network traffic going in and out "
@@ -375,14 +482,22 @@ if (el) {{
 </script>"""
 
 
-def _tour_step_active(text, i, key, avatar, animate):
-    with st.container(key=f"xai_agent_{key}_{i}"), st.chat_message("assistant", avatar=avatar):
+def _tour_step_active(text, i, key, avatar, animate, reduce_motion=False):
+    # Arriving (animate) the agent walks in; on a redraw it is already standing there
+    walk = animate and not reduce_motion
+    with st.container(key=f"xai_agent_{key}_{i}"), \
+            st.container(key=f"xai_walk_{key}_{i}" if walk else None), \
+            st.chat_message("assistant", avatar=avatar if walk else _standing(avatar)):
         st.caption("EDGE-IDPS XAI AGENT · DASHBOARD TOUR")
         if animate:
             # Fixed script built here (no user input), so a same-origin iframe is safe
             with st.container(key=f"xai_tourscroll_{key}_{i}"):
                 st.iframe(tour_scroll_script(f"xai_agent_{key}_{i}"), height=1)
-        _say(text, animate)
+        _say(text, walk)
+
+
+def _standing(avatar):
+    return XAI_AGENT_AVATAR if avatar == XAI_AGENT_WALKING_AVATAR else avatar
 
 
 def _tour_step_past(text, i, key):
@@ -390,7 +505,8 @@ def _tour_step_past(text, i, key):
         st.markdown(text)
 
 
-def render_dashboard_tour(state, slots, avatar=XAI_AGENT_AVATAR, key="tour", steps=None):
+def render_dashboard_tour(state, slots, avatar=XAI_AGENT_WALKING_AVATAR, key="tour", steps=None,
+                          reduce_motion=False):
     """
     Plays the dashboard tour, each step beside the panel it describes.
 
@@ -398,12 +514,18 @@ def render_dashboard_tour(state, slots, avatar=XAI_AGENT_AVATAR, key="tour", ste
     step whose anchor has no slot (e.g. no telemetry yet, so the panels never
     drew) plays in the TOUR_FALLBACK_ANCHOR slot instead.
 
-    Only the current step shows the agent (robot, typing dots, typewriter, and
-    a scroll to bring it into view). When the next step starts, the previous
-    one is redrawn as a dimmed note without the robot, so the agent appears to
-    move from panel to panel. state["shown"] counts the steps already played,
-    so a rerun mid-tour (a widget click) replays nothing: played steps show at
-    once and the tour carries on from where it was.
+    Only the current step shows the agent (robot walking in, typing dots,
+    typewriter, and a scroll to bring it into view). When the next step
+    starts, the previous one is redrawn as a dimmed note without the robot,
+    so the agent appears to walk from panel to panel. state["shown"] counts
+    the steps already started, so a rerun mid-tour (a widget click) replays
+    nothing: those steps show finished at once and the tour carries on with
+    the next one.
+
+    reduce_motion: the browser asks for reduced motion (app.py reads it). Each
+    step then appears whole, with no walk, typing dots or typewriter, and
+    stays for as long as the typewriter would have taken before the agent
+    moves on — so the tour still paces itself, it just doesn't animate.
 
     Must be called after every panel is drawn, since the slots are filled
     from here, late in the script.
@@ -428,6 +550,9 @@ def render_dashboard_tour(state, slots, avatar=XAI_AGENT_AVATAR, key="tour", ste
         if i > 0:
             with placeholders[i - 1].container():
                 _tour_step_past(steps[i - 1].text, i - 1, key)
+        state["shown"] = i + 1  # before playing, so an interrupted step isn't replayed
         with placeholders[i].container():
-            _tour_step_active(steps[i].text, i, key, avatar, animate=True)
-        state["shown"] = i + 1
+            _tour_step_active(steps[i].text, i, key, avatar, animate=True,
+                              reduce_motion=reduce_motion)
+        if reduce_motion and i < len(steps) - 1:
+            time.sleep(reading_time(steps[i].text))

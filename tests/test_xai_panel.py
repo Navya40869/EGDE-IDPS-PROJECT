@@ -95,9 +95,22 @@ class Summary(unittest.TestCase):
             self.assertEqual("".join(xai_panel._typewriter(text)), text)
         finally:
             xai_panel.time = xai_panel_time
-        self.assertTrue(all(xai_panel.TYPEWRITER_MIN_DELAY_S <= d <= xai_panel.TYPEWRITER_MAX_DELAY_S
-                            for d in delays))
-        self.assertLessEqual(sum(delays), 2.0)
+        word, sentence = xai_panel.TYPEWRITER_WORD_S, xai_panel.TYPEWRITER_SENTENCE_PAUSE_S
+        self.assertTrue(all(word <= d <= word + sentence for d in delays))
+        self.assertAlmostEqual(sum(delays), xai_panel.reading_time(text))
+        # Read-along pace: no faster than ~400 words a minute
+        self.assertGreaterEqual(sum(delays), len(text.split()) * 60 / 400)
+
+    def test_typewriter_pauses_at_sentence_ends_and_keeps_paragraphs(self):
+        text = "One, two **three.**\n\nFour"
+        self.assertEqual("".join(xai_panel._words(text)), text)
+        delays = [xai_panel._word_delay(w) for w in xai_panel._words(text)]
+        self.assertGreater(delays[0], delays[1])      # "One," breathes
+        self.assertEqual(max(delays), delays[2])      # "**three.**" ends a sentence
+        self.assertEqual(delays[3], xai_panel.TYPEWRITER_WORD_S)
+
+    def test_typing_dots_hold_for_about_a_second(self):
+        self.assertTrue(1.0 <= xai_panel.TYPING_INDICATOR_S <= 1.5)
 
 
 class Donut(unittest.TestCase):
@@ -116,17 +129,40 @@ class Avatar(unittest.TestCase):
         svg = xai_panel.XAI_AGENT_AVATAR
         root = ET.fromstring(svg)  # raises if malformed
         self.assertTrue(root.tag.endswith("svg"))
-        for name in ("blink", "bob", "twitch", "prefers-reduced-motion"):
+        for name in ("blink", "bob", "tilt", "twitch", "prefers-reduced-motion"):
             self.assertIn(name, svg)
+        self.assertNotIn("@keyframes roll", svg)  # standing still: no walk
+
+    def test_walking_avatar_is_wellformed_and_walk_stops_under_reduced_motion(self):
+        import xml.etree.ElementTree as ET
+        svg = xai_panel.XAI_AGENT_WALKING_AVATAR
+        ET.fromstring(svg)
+        for name in ("@keyframes lean", "@keyframes roll", "@keyframes spin", "blink", "tilt"):
+            self.assertIn(name, svg)
+        reduced = svg.split("@keyframes spin")[1]
+        self.assertIn("prefers-reduced-motion: reduce", reduced)
+        self.assertIn(".walk, .track, .wheel { animation: none; }", reduced)
+        # One-shot arrival, not an endless walk
+        self.assertNotRegex(svg, r"(lean|roll|spin) [^;]*infinite")
+
+    def test_avatars_stay_lightweight(self):
+        self.assertLess(len(xai_panel.XAI_AGENT_WALKING_AVATAR.encode()), 6000)
 
     def test_streamlit_treats_it_as_an_svg_image(self):
         # Same check Streamlit's image_to_url uses to recognise an SVG string
         import re
-        self.assertRegex(xai_panel.XAI_AGENT_AVATAR,
-                         re.compile(r"(^\s?(<\?xml[\s\S]*<svg\s)|^\s?<svg\s|^\s?<svg>\s)"))
+        for svg in (xai_panel.XAI_AGENT_AVATAR, xai_panel.XAI_AGENT_WALKING_AVATAR):
+            self.assertRegex(svg, re.compile(r"(^\s?(<\?xml[\s\S]*<svg\s)|^\s?<svg\s|^\s?<svg>\s)"))
 
     def test_colors_are_themeable(self):
-        self.assertIn("#123456", xai_panel.robot_avatar_svg(line="#123456"))
+        svg = xai_panel.robot_avatar_svg(line="#123456", body="#abcdef")
+        self.assertIn("#123456", svg)
+        self.assertIn("#abcdef", svg)
+
+    def test_redrawn_tour_step_uses_the_standing_robot(self):
+        self.assertEqual(xai_panel._standing(xai_panel.XAI_AGENT_WALKING_AVATAR),
+                         xai_panel.XAI_AGENT_AVATAR)
+        self.assertEqual(xai_panel._standing("🤖"), "🤖")
 
 
 class DashboardTour(unittest.TestCase):
@@ -144,16 +180,18 @@ class DashboardTour(unittest.TestCase):
             words = label.replace("(RAW)", "").replace("ACTIVE FIREWALL", "FIREWALL").strip()
             self.assertIn(words.lower(), tour, f"tour doesn't mention {label!r}")
 
-    def test_tour_is_a_few_short_bubbles(self):
+    def test_tour_is_a_few_short_bubbles_after_the_greeting(self):
         self.assertTrue(4 <= len(xai_panel.DASHBOARD_TOUR) <= 6)
-        for step in xai_panel.DASHBOARD_TOUR:
+        for step in xai_panel.DASHBOARD_TOUR[1:]:
             self.assertLess(len(step.text.split()), 120)
+            self.assertLess(xai_panel.reading_time(step.text), 30)
 
-    def test_tour_opens_with_a_short_greeting_and_greets_only_once(self):
+    def test_tour_opens_with_an_unhurried_greeting_and_greets_only_once(self):
         greeting, *rest = [s.text for s in xai_panel.DASHBOARD_TOUR]
         self.assertTrue(greeting.startswith("Hi"))
-        self.assertLessEqual(len(greeting.split()), 45)
-        self.assertLessEqual(greeting.count(". ") + 1, 2)  # one or two sentences
+        # About a minute to type out, dots included
+        self.assertTrue(45 <= xai_panel.reading_time(greeting) + xai_panel.TYPING_INDICATOR_S <= 75)
+        self.assertGreater(len(greeting.split()), max(len(t.split()) for t in rest))
         for text in rest:
             self.assertFalse(text.lower().startswith(("hi", "hello")))
 
@@ -194,6 +232,7 @@ class AgentCss(unittest.TestCase):
     def test_reduced_motion_disables_tour_transitions(self):
         reduced = xai_panel.AGENT_CSS.split("prefers-reduced-motion: reduce")[1]
         self.assertIn("xai_tourpast_", reduced)
+        self.assertIn("xai_walk_", reduced)
 
 
 if __name__ == "__main__":
