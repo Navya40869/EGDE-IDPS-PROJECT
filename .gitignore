@@ -1,9 +1,22 @@
-# Virtual environment
+# Virtual environments
 .venv/
+venv/
+env/
 
-# Python cache
+# Python cache / tooling
 __pycache__/
 *.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# Secrets — never commit
+.env
+.env.*
+*.env
+# Dashboard login config — real bcrypt hashes + cookie secret; never commit.
+# Commit dashboard/auth_config.example.yaml (the template) instead.
+dashboard/auth_config.yaml
 
 # Large dataset files — never commit these
 Stratified_data.csv
@@ -14,9 +27,18 @@ data/processed/*.npy
 
 # Packet captures
 *.pcap
+*.pcapng
 
-# Logs (generated at runtime)
+# Logs (generated at runtime): telemetry CSVs, blocklists, explanation charts
 logs/
-# Dashboard login config — real bcrypt hashes + cookie secret; never commit.
-# Commit dashboard/auth_config.example.yaml (the template) instead.
-dashboard/auth_config.yaml
+*.log
+
+# IDE folders — except the shared VS Code import paths, which the project needs
+.idea/
+.vscode/*
+!.vscode/settings.json
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
