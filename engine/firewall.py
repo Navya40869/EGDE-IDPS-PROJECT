@@ -46,7 +46,8 @@ class Firewall:
         if mode not in ("simulation", "windows", "linux"):
             raise ValueError(f"Unknown firewall mode: {mode}")
         self.mode = mode
-        self._blocked_ips = set()  # avoid duplicate blocking/log spam
+        self._blocked_ips = set()   # IPs with a full BLOCK_IP (real firewall rule)
+        self._dropped_ips = set()   # IPs already logged for DROP_PACKET (dedup only, not a real block)
 
         if mode == "windows":
             print("=" * 60)
@@ -55,17 +56,26 @@ class Firewall:
             print("Use ONLY on an isolated lab network/VM you control.")
             print("=" * 60)
 
-        # Load any IPs already blocked from a previous run, so we don't
-        # re-block (and re-log) the same IP every time this process restarts.
+        # Load prior-run state from the blocklist so restarts don't re-log
+        # (or, for BLOCK_IP, re-block) the same IP. Keyed by trigger type
+        # (column 3) so a DROP_PACKET-only entry doesn't get treated as a
+        # real BLOCK_IP on restart — that would let an IP that escalates to
+        # BLOCK_IP later get silently skipped because it looked blocked
+        # without ever having a real firewall rule.
         if os.path.exists(BLOCKLIST_PATH):
             with open(BLOCKLIST_PATH) as f:
                 for line in f:
                     parts = line.strip().split(",")
-                    if len(parts) >= 2:
-                        self._blocked_ips.add(parts[1])
+                    if len(parts) >= 3:
+                        ip, trigger = parts[1], parts[2]
+                        if trigger == "BLOCK_IP":
+                            self._blocked_ips.add(ip)
+                        elif trigger == "DROP_PACKET":
+                            self._dropped_ips.add(ip)
 
         print(f"[Firewall] Initialized in '{self.mode}' mode. "
-              f"{len(self._blocked_ips)} IP(s) already on blocklist.")
+              f"{len(self._blocked_ips)} IP(s) already blocked, "
+              f"{len(self._dropped_ips)} IP(s) already logged for DROP_PACKET.")
 
     def act(self, action: str, ip: str, predicted_class: str, risk_score: float) -> dict:
         """
@@ -94,9 +104,10 @@ class Firewall:
         return {"action_taken": "THROTTLE", "ip": ip, "blocked": False}
 
     def _drop_packet(self, ip, predicted_class, risk_score):
-        if ip in self._blocked_ips:
-            return {"action_taken": "DROP_PACKET", "ip": ip, "blocked": True, "already_blocked": True}
+        if ip in self._dropped_ips:
+            return {"action_taken": "DROP_PACKET", "ip": ip, "blocked": False, "already_logged": True}
         self._write_blocklist_entry(ip, predicted_class, risk_score, trigger="DROP_PACKET")
+        self._dropped_ips.add(ip)
         return {"action_taken": "DROP_PACKET", "ip": ip, "blocked": False,
                 "note": "Logged for review; not a full block (see BLOCK_IP for that)."}
 
