@@ -17,3 +17,6 @@ data/processed/*.npy
 
 # Logs (generated at runtime)
 logs/
+# Dashboard login config — real bcrypt hashes + cookie secret; never commit.
+# Commit dashboard/auth_config.example.yaml (the template) instead.
+dashboard/auth_config.yaml

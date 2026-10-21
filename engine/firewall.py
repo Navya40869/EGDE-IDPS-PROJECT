@@ -14,16 +14,25 @@ Takes the action string from RiskEngine.assess() ("LOG_ONLY", "THROTTLE",
 response. Only DROP_PACKET/BLOCK_IP result in a blocklist entry — LOG_ONLY
 and THROTTLE are informational and don't block anything.
 
-Usage (standalone test):
-    python engine/firewall.py
+Usage:
+    python engine/firewall.py                      # standalone simulation test
+    python engine/firewall.py --cleanup --dry-run  # list this project's Windows Firewall rules
+    python engine/firewall.py --cleanup            # delete them (needs Administrator)
 """
 
+import argparse
 import os
+import re
 import subprocess
 import time
 
 LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
 BLOCKLIST_PATH = os.path.join(LOGS_DIR, "active_blocklist.txt")
+
+# Every Windows Firewall rule this project creates is named RULE_PREFIX + <ip>.
+# Cleanup only ever touches names that fully match RULE_NAME_RE.
+RULE_PREFIX = "EdgeIDPS_Block_"
+RULE_NAME_RE = re.compile(r"^EdgeIDPS_Block_[0-9A-Fa-f.:]+$")
 
 os.makedirs(LOGS_DIR, exist_ok=True)
 
@@ -116,7 +125,7 @@ class Firewall:
 
     def _windows_block(self, ip):
         """LAB NETWORK ONLY — actually adds a Windows Firewall rule."""
-        rule_name = f"EdgeIDPS_Block_{ip}"
+        rule_name = f"{RULE_PREFIX}{ip}"
         try:
             subprocess.run([
                 "netsh", "advfirewall", "firewall", "add", "rule",
@@ -137,7 +146,51 @@ class Firewall:
         return ip in self._blocked_ips
 
 
-def main():
+def list_project_rules() -> list:
+    """Display names of Windows Firewall rules created by _windows_block().
+
+    Uses Get-NetFirewallRule rather than parsing `netsh ... show rule`, whose
+    output labels are localized. A netsh rule's name= is its DisplayName.
+    """
+    result = subprocess.run([
+        "powershell", "-NoProfile", "-NonInteractive", "-Command",
+        f"Get-NetFirewallRule -DisplayName '{RULE_PREFIX}*' -ErrorAction SilentlyContinue "
+        f"| ForEach-Object {{ $_.DisplayName }}",
+    ], check=True, capture_output=True, text=True)
+    names = {line.strip() for line in result.stdout.splitlines()}
+    return sorted(n for n in names if RULE_NAME_RE.match(n))
+
+
+def cleanup_windows_rules(dry_run: bool = False) -> int:
+    """Deletes only EdgeIDPS_Block_<ip> rules. Does not touch active_blocklist.txt."""
+    names = list_project_rules()
+    if not names:
+        print(f"[Firewall] No '{RULE_PREFIX}*' rules found.")
+        return 0
+    print(f"[Firewall] Found {len(names)} project rule name(s):")
+    for name in names:
+        print(f"    {name}")
+    if dry_run:
+        print("[Firewall] --dry-run: nothing deleted.")
+        return 0
+
+    failures = 0
+    for name in names:
+        # netsh deletes every rule with this exact name, so duplicates go too.
+        result = subprocess.run([
+            "netsh", "advfirewall", "firewall", "delete", "rule", f"name={name}",
+        ], capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"[Firewall] Deleted: {name}")
+        else:
+            failures += 1
+            print(f"[Firewall] ERROR deleting {name}: {(result.stdout + result.stderr).strip()}")
+    if failures:
+        print("[Firewall] Common cause: not running as Administrator.")
+    return 1 if failures else 0
+
+
+def run_simulation_test():
     print("Standalone Firewall test (Simulation mode) — no real network changes made.\n")
     fw = Firewall(mode="simulation")
 
@@ -159,6 +212,21 @@ def main():
     print(f"\nBlocklist file contents ({BLOCKLIST_PATH}):")
     with open(BLOCKLIST_PATH) as f:
         print(f.read())
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Edge-IDPS firewall module")
+    parser.add_argument("--cleanup", action="store_true",
+                        help=f"Delete Windows Firewall rules named {RULE_PREFIX}<ip>")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="With --cleanup: list matching rules without deleting")
+    args = parser.parse_args()
+
+    if args.dry_run and not args.cleanup:
+        parser.error("--dry-run only applies with --cleanup")
+    if args.cleanup:
+        raise SystemExit(cleanup_windows_rules(dry_run=args.dry_run))
+    run_simulation_test()
 
 
 if __name__ == "__main__":
